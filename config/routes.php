@@ -5,11 +5,15 @@ class Router
 {
     private static $routes = [];
     private static $baseUrl = '/PAI';
+    private static $errorPages = [
+        403 => '/../views/errors/403.php',
+        404 => '/../views/errors/404.php',
+        500 => '/../views/errors/500.php'
+    ];
 
     // Define routes and their handlers
     public static function init()
     {
-        // Auth routes
         self::$routes = [
             // Auth routes
             'auth/login' => [
@@ -73,15 +77,51 @@ class Router
                 'auth' => true,
                 'role' => 'guru'
             ],
+            'guru/materi/edit/{id}' => [
+                'controller' => 'MateriController',
+                'action' => 'edit',
+                'auth' => true,
+                'role' => 'guru'
+            ],
+            'guru/materi/delete/{id}' => [
+                'controller' => 'MateriController',
+                'action' => 'delete',
+                'auth' => true,
+                'role' => 'guru'
+            ],
             'guru/quiz' => [
                 'controller' => 'QuizController',
                 'action' => 'index',
                 'auth' => true,
                 'role' => 'guru'
             ],
+            'guru/quiz/create' => [
+                'controller' => 'QuizController',
+                'action' => 'create',
+                'auth' => true,
+                'role' => 'guru'
+            ],
+            'guru/quiz/edit/{id}' => [
+                'controller' => 'QuizController',
+                'action' => 'edit',
+                'auth' => true,
+                'role' => 'guru'
+            ],
+            'guru/quiz/delete/{id}' => [
+                'controller' => 'QuizController',
+                'action' => 'delete',
+                'auth' => true,
+                'role' => 'guru'
+            ],
             'guru/penilaian' => [
                 'controller' => 'GuruController',
                 'action' => 'penilaian',
+                'auth' => true,
+                'role' => 'guru'
+            ],
+            'guru/penilaian/input/{id}' => [
+                'controller' => 'GuruController',
+                'action' => 'inputNilai',
                 'auth' => true,
                 'role' => 'guru'
             ],
@@ -99,9 +139,27 @@ class Router
                 'auth' => true,
                 'role' => 'siswa'
             ],
+            'siswa/materi/view/{id}' => [
+                'controller' => 'MateriController',
+                'action' => 'viewMateri',
+                'auth' => true,
+                'role' => 'siswa'
+            ],
             'siswa/quiz' => [
                 'controller' => 'QuizController',
                 'action' => 'listQuizSiswa',
+                'auth' => true,
+                'role' => 'siswa'
+            ],
+            'siswa/quiz/attempt/{id}' => [
+                'controller' => 'QuizController',
+                'action' => 'attemptQuiz',
+                'auth' => true,
+                'role' => 'siswa'
+            ],
+            'siswa/quiz/submit/{id}' => [
+                'controller' => 'QuizController',
+                'action' => 'submitQuiz',
                 'auth' => true,
                 'role' => 'siswa'
             ],
@@ -125,15 +183,33 @@ class Router
                 'auth' => true,
                 'role' => 'orangtua'
             ],
+            'orangtua/anak-progress/{id}' => [
+                'controller' => 'OrangTuaController',
+                'action' => 'detailProgress',
+                'auth' => true,
+                'role' => 'orangtua'
+            ],
             'orangtua/feedback' => [
                 'controller' => 'OrangTuaController',
                 'action' => 'feedback',
                 'auth' => true,
                 'role' => 'orangtua'
             ],
+            'orangtua/feedback/submit' => [
+                'controller' => 'OrangTuaController',
+                'action' => 'submitFeedback',
+                'auth' => true,
+                'role' => 'orangtua'
+            ],
             'orangtua/notifications' => [
                 'controller' => 'NotifikasiController',
                 'action' => 'index',
+                'auth' => true,
+                'role' => 'orangtua'
+            ],
+            'orangtua/notifications/read/{id}' => [
+                'controller' => 'NotifikasiController',
+                'action' => 'markAsRead',
                 'auth' => true,
                 'role' => 'orangtua'
             ]
@@ -200,46 +276,73 @@ class Router
         return true;
     }
 
+    // Handle errors
+    public static function handleError($code)
+    {
+        http_response_code($code);
+        $errorFile = __DIR__ . self::$errorPages[$code];
+
+        if (file_exists($errorFile)) {
+            require_once $errorFile;
+        } else {
+            echo "Error $code occurred.";
+        }
+        return false;
+    }
+
     // Load and execute route
     public static function load($path)
     {
-        $route = self::getRoute($path);
+        try {
+            $route = self::getRoute($path);
 
-        if (!$route) {
-            http_response_code(404);
-            require_once __DIR__ . '/../views/errors/404.php';
-            return;
-        }
-
-        if (!self::hasAccess($route)) {
-            if (!isset($_SESSION['user_id'])) {
-                header('Location: ' . self::url('auth/login'));
-                exit;
+            if (!$route) {
+                return self::handleError(404);
             }
-            http_response_code(403);
-            require_once __DIR__ . '/../views/errors/403.php';
-            return;
+
+            if (!self::hasAccess($route)) {
+                if (!isset($_SESSION['user_id'])) {
+                    header('Location: ' . self::url('auth/login'));
+                    exit;
+                }
+                return self::handleError(403);
+            }
+
+            $controllerName = $route['controller'];
+            $actionName = $route['action'];
+            $controllerFile = __DIR__ . "/../controllers/{$controllerName}.php";
+
+            if (!file_exists($controllerFile)) {
+                throw new Exception("Controller file not found: {$controllerFile}");
+            }
+
+            require_once $controllerFile;
+            $controller = new $controllerName();
+
+            if (!method_exists($controller, $actionName)) {
+                throw new Exception("Action {$actionName} not found in controller {$controllerName}");
+            }
+
+            $params = isset($route['params']) ? $route['params'] : [];
+            return call_user_func_array([$controller, $actionName], $params);
+        } catch (Exception $e) {
+            error_log("Application error: " . $e->getMessage());
+            return self::handleError(500);
         }
-
-        $controllerName = $route['controller'];
-        $actionName = $route['action'];
-        $controllerFile = __DIR__ . "/../controllers/{$controllerName}.php";
-
-        if (!file_exists($controllerFile)) {
-            throw new Exception("Controller file not found: {$controllerFile}");
-        }
-
-        require_once $controllerFile;
-        $controller = new $controllerName();
-
-        if (!method_exists($controller, $actionName)) {
-            throw new Exception("Action {$actionName} not found in controller {$controllerName}");
-        }
-
-        $params = isset($route['params']) ? $route['params'] : [];
-        return call_user_func_array([$controller, $actionName], $params);
     }
 }
+
+// Set custom error handler
+set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+    error_log("Error [$errno] $errstr on line $errline in file $errfile");
+    Router::handleError(500);
+});
+
+// Set custom exception handler
+set_exception_handler(function ($exception) {
+    error_log("Uncaught exception: " . $exception->getMessage());
+    Router::handleError(500);
+});
 
 // Initialize routes
 Router::init();
