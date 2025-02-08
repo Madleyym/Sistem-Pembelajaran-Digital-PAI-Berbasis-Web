@@ -1,3 +1,5 @@
+<!-- /opt/lampp/htdocs/PAI/public/index.php -->
+
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
@@ -187,4 +189,3 @@ endif;
 // End output buffering and send to browser
 ob_end_flush();
 ?>
-
