@@ -1,117 +1,190 @@
-// public/index.php
 <?php
 session_start();
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/routes.php';
+require_once __DIR__ . '/../helpers/utils.php';
 
-// Load configuration
-require_once '../config/database.php';
-require_once '../config/routes.php';
+// Error reporting for development
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// Load controllers
-require_once '../controllers/AuthController.php';
-require_once '../controllers/AdminController.php';
-require_once '../controllers/GuruController.php';
-require_once '../controllers/SiswaController.php';
-require_once '../controllers/OrangTuaController.php';
-require_once '../controllers/MateriController.php';
-require_once '../controllers/QuizController.php';
-require_once '../controllers/NotifikasiController.php';
+// Database connection
+try {
+    $db = new PDO(
+        "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME,
+        DB_USER,
+        DB_PASSWORD
+    );
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("Connection failed: " . $e->getMessage());
+}
 
-// Load helpers
-require_once '../helpers/utils.php';
+// Function to check if user is logged in
+function isLoggedIn()
+{
+    return isset($_SESSION['user_id']) && isset($_SESSION['role']);
+}
 
-// Initialize Auth Controller
-$auth = new AuthController();
+// Function to check user role
+function hasRole($role)
+{
+    return isset($_SESSION['role']) && $_SESSION['role'] === $role;
+}
+
+// Function to get current page name for active menu highlighting
+function getCurrentPage()
+{
+    $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    return trim($path, '/');
+}
+
+// Function to check if menu item is active
+function isActiveMenu($path)
+{
+    $currentPage = getCurrentPage();
+    return strpos($currentPage, $path) === 0 ? 'active' : '';
+}
+
+// Get unread notifications count
+function getUnreadNotificationsCount($userId)
+{
+    global $db;
+    $stmt = $db->prepare("SELECT COUNT(*) FROM notifikasi WHERE user_id = ? AND dibaca = FALSE");
+    $stmt->execute([$userId]);
+    return $stmt->fetchColumn();
+}
+
+// Redirect if not logged in
+if (!isLoggedIn() && !in_array(getCurrentPage(), ['auth/login', 'auth/register'])) {
+    header('Location: /auth/login.php');
+    exit();
+}
 
 // Basic routing
 $request = $_SERVER['REQUEST_URI'];
-$method = $_SERVER['REQUEST_METHOD'];
+$basePath = '/pai'; // Sesuaikan dengan base path aplikasi Anda
+$request = str_replace($basePath, '', $request);
 
-// Remove query strings
-$request = strtok($request, '?');
+// Start output buffering
+ob_start();
 
-// Define routes
-switch ($request) {
-    case '/':
-        if (isset($_SESSION['user_id'])) {
-            switch ($_SESSION['role']) {
-                case 'admin':
-                    header('Location: /admin/dashboard.php');
-                    break;
-                case 'guru':
-                    header('Location: /guru/dashboard.php');
-                    break;
-                case 'siswa':
-                    header('Location: /siswa/dashboard.php');
-                    break;
-                case 'orangtua':
-                    header('Location: /orangtua/dashboard.php');
-                    break;
-            }
-        } else {
-            header('Location: /auth/login.php');
-        }
-        break;
-
-    case '/auth/login':
-        if ($method === 'POST') {
-            $username = $_POST['username'] ?? '';
-            $password = $_POST['password'] ?? '';
-
-            if ($auth->login($username, $password)) {
-                // Redirect handled in login method
-            } else {
-                $_SESSION['error'] = 'Username atau password salah';
-                header('Location: /auth/login.php');
-            }
-        } else {
-            require '../views/auth/login.php';
-        }
-        break;
-
-    case '/auth/register':
-        if ($method === 'POST') {
-            $userData = [
-                'username' => $_POST['username'],
-                'password' => $_POST['password'],
-                'email' => $_POST['email'],
-                'role' => $_POST['role'],
-                'nama_lengkap' => $_POST['nama_lengkap']
-            ];
-
-            // Add role-specific data
-            if ($_POST['role'] === 'siswa') {
-                $userData += [
-                    'nis' => $_POST['nis'],
-                    'kelas_id' => $_POST['kelas_id'],
-                    'tanggal_lahir' => $_POST['tanggal_lahir'],
-                    'jenis_kelamin' => $_POST['jenis_kelamin'],
-                    'alamat' => $_POST['alamat']
-                ];
-            } elseif ($_POST['role'] === 'orangtua') {
-                $userData += [
-                    'siswa_id' => $_POST['siswa_id'],
-                    'hubungan' => $_POST['hubungan']
-                ];
-            }
-
-            if ($auth->register($userData)) {
-                $_SESSION['success'] = 'Registrasi berhasil. Silakan login.';
-                header('Location: /auth/login.php');
-            } else {
-                $_SESSION['error'] = 'Registrasi gagal. Silakan coba lagi.';
-                header('Location: /auth/register.php');
-            }
-        } else {
-            require '../views/auth/register.php';
-        }
-        break;
-
-    case '/auth/logout':
-        $auth->logout();
-        break;
-
-    default:
-        http_response_code(404);
-        require '../views/404.php';
-        break;
+// Include header for logged-in users
+if (isLoggedIn()) {
+    // Get notifications count for the current user
+    $notificationCount = getUnreadNotificationsCount($_SESSION['user_id']);
+    include '../views/layouts/header.php';
 }
+
+// Route to appropriate file
+$path = trim(parse_url($request, PHP_URL_PATH), '/');
+
+$routes = [
+    'auth/login' => '../auth/login.php',
+    'auth/register' => '../auth/register.php',
+    'auth/logout' => '../auth/logout.php',
+
+    // Admin routes
+    'admin/dashboard' => '../views/admin/dashboard.php',
+    'admin/manajemen-guru' => '../views/admin/manajemen_guru.php',
+    'admin/manajemen-siswa' => '../views/admin/manajemen_siswa.php',
+    'admin/laporan' => '../views/admin/laporan.php',
+
+    // Guru routes
+    'guru/dashboard' => '../views/guru/dashboard.php',
+    'guru/materi' => '../views/guru/materi.php',
+    'guru/quiz' => '../views/guru/quiz.php',
+    'guru/penilaian' => '../views/guru/penilaian.php',
+
+    // Siswa routes
+    'siswa/dashboard' => '../views/siswa/dashboard.php',
+    'siswa/materi' => '../views/siswa/materi.php',
+    'siswa/quiz' => '../views/siswa/quiz.php',
+    'siswa/progres-belajar' => '../views/siswa/progres_belajar.php',
+
+    // Orang Tua routes
+    'orangtua/dashboard' => '../views/orangtua/dashboard.php',
+    'orangtua/anak-progress' => '../views/orangtua/anak_progress.php',
+    'orangtua/feedback' => '../views/orangtua/feedback.php',
+    'orangtua/notifications' => '../views/orangtua/notifications.php'
+];
+
+if (array_key_exists($path, $routes)) {
+    include $routes[$path];
+} else {
+    // Handle 404
+    http_response_code(404);
+    include '../views/errors/404.php';
+}
+
+// Include footer for logged-in users
+if (isLoggedIn()) {
+    include '../views/layouts/footer.php';
+}
+
+// Add JavaScript for interactive elements
+if (isLoggedIn()):
+?>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Mobile menu functionality
+            const mobileMenuButton = document.getElementById('mobile-menu-button');
+            const mobileMenuClose = document.getElementById('mobile-menu-close');
+            const mobileMenu = document.getElementById('mobile-menu');
+
+            mobileMenuButton.addEventListener('click', () => {
+                mobileMenu.classList.add('active');
+            });
+
+            mobileMenuClose.addEventListener('click', () => {
+                mobileMenu.classList.remove('active');
+            });
+
+            // User menu dropdown functionality
+            const userMenuButton = document.getElementById('user-menu-button');
+            const userMenu = document.getElementById('user-menu');
+            let userMenuOpen = false;
+
+            userMenuButton.addEventListener('click', () => {
+                userMenuOpen = !userMenuOpen;
+                if (userMenuOpen) {
+                    userMenu.classList.add('active');
+                } else {
+                    userMenu.classList.remove('active');
+                }
+            });
+
+            // Close user menu when clicking outside
+            document.addEventListener('click', (event) => {
+                if (!userMenuButton.contains(event.target) && !userMenu.contains(event.target)) {
+                    userMenu.classList.remove('active');
+                    userMenuOpen = false;
+                }
+            });
+
+            // Close mobile menu when clicking outside
+            document.addEventListener('click', (event) => {
+                if (!mobileMenuButton.contains(event.target) &&
+                    !mobileMenu.contains(event.target) &&
+                    mobileMenu.classList.contains('active')) {
+                    mobileMenu.classList.remove('active');
+                }
+            });
+
+            // Add active class to current page in navigation
+            const currentPath = window.location.pathname;
+            document.querySelectorAll('.nav-link').forEach(link => {
+                if (link.getAttribute('href') === currentPath) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+<?php
+endif;
+
+// End output buffering and send to browser
+ob_end_flush();
+?>
+
